@@ -1,19 +1,29 @@
 /**
  * Backend selection. Explicit `JEV_BACKEND` wins; otherwise the first
- * credential found decides: TypeSafe direct → OpenRouter → Vercel AI
- * Gateway. `mock` must be asked for explicitly — it never engages on its
- * own, so a missing key is a loud, named error instead of silent fakery.
+ * credential found decides: TypeSafe direct → OpenRouter → SiliconFlow →
+ * Vercel AI Gateway. When auto mode finds several credentials, they become a
+ * fallback chain (`FallbackBackend`): an unreachable or auth-rejected backend
+ * hands over to the next, and the result names whoever actually answered.
+ * `mock` must be asked for explicitly — it never engages on its own, so a
+ * missing key is a loud, named error instead of silent fakery.
  */
 
+import { FallbackBackend } from "./fallback.js";
 import { MockBackend } from "./mock.js";
 import { OpenRouterBackend } from "./openrouter.js";
+import { SiliconFlowBackend } from "./siliconflow.js";
 import { TypeSafeBackend } from "./typesafe.js";
 import { UnconfiguredBackend } from "./unconfigured.js";
 import { VercelBackend } from "./vercel.js";
 import type { JevBackend } from "./types.js";
 
 /** The backends that ship with jev-use. */
-export type BackendName = "typesafe" | "openrouter" | "vercel" | "mock";
+export type BackendName =
+  | "typesafe"
+  | "openrouter"
+  | "siliconflow"
+  | "vercel"
+  | "mock";
 
 /** A backend plus the story of how it was chosen. */
 export interface ResolvedBackend {
@@ -43,6 +53,8 @@ export function createBackend(
       return { backend: typesafe(env), via: "explicit: typesafe" };
     case "openrouter":
       return { backend: openrouter(env), via: "explicit: openrouter" };
+    case "siliconflow":
+      return { backend: siliconflow(env), via: "explicit: siliconflow" };
     case "vercel":
       return { backend: vercel(env), via: "explicit: vercel" };
     case "mock":
@@ -52,24 +64,37 @@ export function createBackend(
       };
     default:
       throw new Error(
-        `Unknown backend "${requested}". Valid: typesafe | openrouter | vercel | mock.`,
+        `Unknown backend "${requested}". ` +
+          "Valid: typesafe | openrouter | siliconflow | vercel | mock.",
       );
   }
 
+  const candidates: ResolvedBackend[] = [];
   if (env.TYPESAFE_API_KEY || env.TYPESAFE_AI_API_KEY) {
-    return { backend: typesafe(env), via: "auto: TYPESAFE_API_KEY found" };
+    candidates.push({ backend: typesafe(env), via: "auto: TYPESAFE_API_KEY found" });
   }
   if (env.OPENROUTER_API_KEY) {
-    return { backend: openrouter(env), via: "auto: OPENROUTER_API_KEY found" };
+    candidates.push({ backend: openrouter(env), via: "auto: OPENROUTER_API_KEY found" });
+  }
+  if (env.SILICONFLOW_API_KEY) {
+    candidates.push({ backend: siliconflow(env), via: "auto: SILICONFLOW_API_KEY found" });
   }
   if (env.AI_GATEWAY_API_KEY) {
-    return { backend: vercel(env), via: "auto: AI_GATEWAY_API_KEY found" };
+    candidates.push({ backend: vercel(env), via: "auto: AI_GATEWAY_API_KEY found" });
   }
-  throw new Error(
-    "No Jev credentials found. Set one of TYPESAFE_API_KEY (direct), " +
-      "OPENROUTER_API_KEY, or AI_GATEWAY_API_KEY (Vercel AI Gateway) — " +
-      "or run with JEV_BACKEND=mock for a keyless dry run.",
-  );
+  if (candidates.length === 0) {
+    throw new Error(
+      "No Jev credentials found. Set one of TYPESAFE_API_KEY (direct), " +
+        "OPENROUTER_API_KEY, SILICONFLOW_API_KEY, or AI_GATEWAY_API_KEY " +
+        "(Vercel AI Gateway) — or run with JEV_BACKEND=mock for a keyless dry run.",
+    );
+  }
+  if (candidates.length === 1) return candidates[0];
+  const names = candidates.map((candidate) => candidate.backend.name);
+  return {
+    backend: new FallbackBackend(candidates.map((candidate) => candidate.backend)),
+    via: `auto fallback chain: ${names.join(" → ")}`,
+  };
 }
 
 function typesafe(env: Record<string, string | undefined>): TypeSafeBackend {
@@ -88,6 +113,16 @@ function openrouter(env: Record<string, string | undefined>): OpenRouterBackend 
   return new OpenRouterBackend({
     apiKey,
     baseUrl: env.OPENROUTER_BASE_URL,
+    defaultModel: env.JEV_MODEL,
+  });
+}
+
+function siliconflow(env: Record<string, string | undefined>): SiliconFlowBackend {
+  const apiKey = env.SILICONFLOW_API_KEY;
+  if (!apiKey) throw new Error("JEV_BACKEND=siliconflow needs SILICONFLOW_API_KEY.");
+  return new SiliconFlowBackend({
+    apiKey,
+    baseUrl: env.SILICONFLOW_BASE_URL,
     defaultModel: env.JEV_MODEL,
   });
 }

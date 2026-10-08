@@ -1,6 +1,25 @@
-/** Shared HTTP plumbing for all remote backends: timeout, retry, errors. */
+/** Shared HTTP plumbing for all remote backends: timeout, retry, errors, proxy. */
 
+import { ProxyAgent, fetch as undiciFetch } from "undici";
 import { BackendError } from "./types.js";
+
+/**
+ * Explicit outbound proxy, opted in per environment with `JEV_PROXY`
+ * (e.g. `JEV_PROXY=http://127.0.0.1:7890`). Never read `HTTPS_PROXY` here:
+ * some local proxies inject a dead one into every session's environment,
+ * and honoring it would break calls that work direct. Lazily created and
+ * cached, recreated only if the URL changes.
+ */
+let cachedProxy: { url: string; agent: ProxyAgent } | undefined;
+
+function proxyDispatcher(): ProxyAgent | undefined {
+  const url = process.env.JEV_PROXY?.trim();
+  if (!url) return undefined;
+  if (!cachedProxy || cachedProxy.url !== url) {
+    cachedProxy = { url, agent: new ProxyAgent(url) };
+  }
+  return cachedProxy.agent;
+}
 
 /** Transport knobs every remote backend accepts. */
 export interface HttpOptions {
@@ -38,7 +57,7 @@ export async function postJson(
     const controller = new AbortController();
     const timer = setTimeout(() => controller.abort(), timeoutMs);
     try {
-      const response = await fetch(url, {
+      const init: RequestInit = {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
@@ -47,7 +66,18 @@ export async function postJson(
         },
         body: JSON.stringify(body),
         signal: controller.signal,
-      });
+      };
+      const dispatcher = proxyDispatcher();
+      // Node's built-in fetch ignores an npm-undici setGlobalDispatcher, so
+      // the proxied path must use undici's own fetch with a per-call agent.
+      // undici's Response is structurally the same surface but a distinct
+      // type, hence the cast back to the DOM Response.
+      const response: Response = dispatcher
+        ? ((await undiciFetch(
+            url,
+            { ...init, dispatcher } as unknown as Parameters<typeof undiciFetch>[1],
+          )) as unknown as Response)
+        : await fetch(url, init);
       if (response.ok) {
         return (await response.json()) as unknown;
       }

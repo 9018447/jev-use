@@ -67,6 +67,7 @@ describe("pi extension", () => {
     vi.stubEnv("JEV_BACKEND", "");
     vi.stubEnv("TYPESAFE_API_KEY", "");
     vi.stubEnv("OPENROUTER_API_KEY", "");
+    vi.stubEnv("SILICONFLOW_API_KEY", "");
     vi.stubEnv("AI_GATEWAY_API_KEY", "");
     // fresh module state so the cached backend from other tests is dropped
     vi.resetModules();

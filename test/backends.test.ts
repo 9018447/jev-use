@@ -195,7 +195,7 @@ describe("OpenRouterBackend", () => {
 
     expect(calls[0].url).toBe("https://openrouter.ai/api/alpha/decisions");
     const body = JSON.parse(String(calls[0].init.body));
-    expect(body.model).toBe("typesafe/jev-latest");
+    expect(body.model).toBe("typesafe/jev-1.13");
     // instructions must be present on every question (OpenRouter requires it)
     for (const q of Object.values(body.questions) as { instructions?: string }[]) {
       expect(q.instructions).toBeTruthy();

@@ -14,7 +14,7 @@ import type {
 } from "./types.js";
 
 export const OPENROUTER_BASE_URL = "https://openrouter.ai";
-export const OPENROUTER_DEFAULT_MODEL = "typesafe/jev-latest";
+export const OPENROUTER_DEFAULT_MODEL = "typesafe/jev-1.13";
 
 /** How to reach OpenRouter's decisions endpoint. */
 export interface OpenRouterOptions extends HttpOptions {
